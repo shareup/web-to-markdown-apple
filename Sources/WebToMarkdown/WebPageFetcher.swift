@@ -12,7 +12,7 @@ public enum WebPageFetcher {
         case timeout
         case noHTML
     }
-
+    
     public static func fetchHTML(from url: URL, timeout: TimeInterval = 30) async throws -> String {
         os_log(
             .info,
@@ -20,17 +20,24 @@ public enum WebPageFetcher {
             "🔧TOOLCALL🔧 WebPageFetcher: Loading URL: %{public}s",
             url.absoluteString
         )
-
+        
         let state = Locked(State.initial)
-        return try await withCheckedThrowingContinuation { continuation in
-            Task {
-                await withTaskCancellationHandler(
-                    operation: { @MainActor () -> Void in
+        
+        return try await withTaskCancellationHandler(
+            operation: {
+                try await withCheckedThrowingContinuation(
+                    isolation: MainActor.shared
+                ) { continuation in
+                    MainActor.assertIsolated()
+                    MainActor.assumeIsolated {
+                        guard state.access({ $0.prepare(with: continuation )}) else {
+                            return
+                        }
+                        
                         let config = WKWebViewConfiguration()
                         config.defaultWebpagePreferences.preferredContentMode = .mobile
                         
                         let webView = WKWebView(frame: .zero, configuration: config)
-                        state.access { $0.start(with: webView, continuation: continuation) }
                         
                         let cssScript = WKUserScript(
                             source: """
@@ -49,18 +56,58 @@ public enum WebPageFetcher {
                             timeout: timeout
                         )
                         
+                        state.access { state in
+                            state.start(
+                                with: webView,
+                                delegate: delegate
+                            )
+                        }
+                        
                         webView.navigationDelegate = delegate
+                        
+                        guard !Task.isCancelled else {
+                            state.access { $0.cancel() }
+                            return
+                        }
                         
                         let request = URLRequest(url: url, timeoutInterval: timeout)
                         webView.load(request)
-                    },
-                    onCancel: {
-                        state.access { $0.cancel() }
-                    },
-                    isolation: MainActor.shared
-                )
-            }
-        }
+                    }
+                }
+            },
+            onCancel: {
+                // NOTE: Even though `isolation: MainActor.shared` is specified
+                //       below, neither `operation` nor `onCancel` are called
+                //       on `MainActor` if they weren't already running on
+                //       `MainActor`.
+                //
+                //       I'm no Swift Foundation engineer, but it doesn't seem
+                //       like `isolation` is used anywhere in the current version
+                //       of `withTaskCancellationHandler()`:
+                //
+                //       ```
+                //       public func withTaskCancellationHandler<T>(
+                //         operation: () async throws -> T,
+                //         onCancel handler: @Sendable () -> Void,
+                //         isolation: isolated (any Actor)? = #isolation
+                //       ) async rethrows -> T {
+                //         // unconditionally add the cancellation record to the task.
+                //         // if the task was already cancelled, it will be executed right away.
+                //         let record = unsafe _taskAddCancellationHandler(handler: handler)
+                //         defer { unsafe _taskRemoveCancellationHandler(record: record) }
+                //
+                //
+                //         return try await operation()
+                //       }
+                //       ```
+                //
+                //       https://github.com/swiftlang/swift/blob/5d480ef063859a0f459f4149df536db4fb330a50/stdlib/public/Concurrency/TaskCancellation.swift#L73-L84
+                Task { @MainActor in
+                    state.access { $0.cancel() }
+                }
+            },
+            isolation: MainActor.shared
+        )
     }
 }
 
@@ -79,12 +126,12 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
         self.state = state
         super.init()
 
-        timeoutTask = Task {
-            MainActor.assertIsolated()
+        timeoutTask = Task { @MainActor in            
             try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
             guard !Task.isCancelled,
                   state.access({ $0.fail(with: WebPageFetcher.Error.timeout) })
             else { return }
+            
             os_log(
                 .error,
                 log: log,
@@ -194,43 +241,74 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
 private typealias FetchContinuation = CheckedContinuation<String, Swift.Error>
 private enum State: Sendable {
     case initial
-    case inProgress(WKWebView, FetchContinuation)
+    case inProgress(WKWebView, NavigationDelegate, FetchContinuation)
     case terminal
+    case waitingForWebView(FetchContinuation)
+    
+    mutating func prepare(
+        with continuation: FetchContinuation
+    ) -> Bool {
+        guard !Task.isCancelled else {
+            self = .terminal
+            continuation.resume(throwing: CancellationError())
+            return false
+        }
+        
+        switch self {
+        case .initial:
+            self = .waitingForWebView(continuation)
+            return true
+            
+        case .inProgress, .waitingForWebView:
+            assertionFailure()
+            continuation.resume(throwing: CancellationError())
+            return false
+            
+        case .terminal:
+            continuation.resume(throwing: CancellationError())
+            return false
+        }
+    }
     
     mutating func start(
         with webView: WKWebView,
-        continuation: FetchContinuation
+        delegate: NavigationDelegate
     ) {
         MainActor.assertIsolated()
         switch self {
         case .initial:
-            self = .inProgress(webView, continuation)
+            assertionFailure()
+            self = .terminal
             
         case .inProgress:
             assertionFailure()
             break
             
         case .terminal:
-            assertionFailure()
             break
+            
+        case let .waitingForWebView(continuation):
+            self = .inProgress(webView, delegate, continuation)
         }
     }
     
+    @MainActor
     mutating func cancel() {
-        MainActor.assertIsolated()
         switch self {
         case .initial:
             self = .terminal
             
-        case let .inProgress(webView, continuation):
-            continuation.resume(throwing: CancellationError())
-            MainActor.assumeIsolated {
-                webView.stopLoading()
-            }
+        case let .inProgress(webView, _, continuation):
             self = .terminal
+            continuation.resume(throwing: CancellationError())
+            webView.stopLoading()
             
         case .terminal:
             break
+            
+        case let .waitingForWebView(continuation):
+            self = .terminal
+            continuation.resume(throwing: CancellationError())
         }
     }
     
@@ -242,40 +320,55 @@ private enum State: Sendable {
             self = .terminal
             return false
             
-        case let .inProgress(_, continuation):
-            continuation.resume(returning: html)
+        case let .inProgress(_, _, continuation):
             self = .terminal
+            continuation.resume(returning: html)
             return true
             
         case .terminal:
             return false
+            
+        case let .waitingForWebView(continuation):
+            assertionFailure()
+            self = .terminal
+            continuation.resume(returning: html)
+            return true
         }
     }
     
+    @MainActor
     mutating func fail(with error: Swift.Error) -> Bool {
-        MainActor.assertIsolated()
         switch self {
         case .initial:
             self = .terminal
             return true
             
-        case let .inProgress(webView, continuation):
+        case let .inProgress(webView, _, continuation):
+            self = .terminal
             continuation.resume(throwing: error)
-            MainActor.assumeIsolated {
-                webView.stopLoading()
-            }
+            webView.stopLoading()
             return true
             
         case .terminal:
             return false
+            
+        case let .waitingForWebView(continuation):
+            self = .terminal
+            continuation.resume(throwing: error)
+            return true
         }
     }
     
+    @MainActor
     var shouldLoadJavaScript: Bool {
-        MainActor.assertIsolated()
         switch self {
         case .initial, .terminal:
             return false
+            
+        case .waitingForWebView:
+            assertionFailure()
+            return true
+            
         case .inProgress:
             return true
         }
