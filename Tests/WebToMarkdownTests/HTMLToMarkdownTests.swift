@@ -358,6 +358,15 @@ import Testing
         #expect(markdown.contains("[Link](//example.com/path)"))
     }
 
+    @Test func convertProtocolRelativeURLWithBaseURL() throws {
+        let html = """
+        <html><body><a href="//example.com/path">Link</a></body></html>
+        """
+        let baseURL = URL(string: "http://mysite.test")
+        let markdown = try HTMLToMarkdown.convert(html, baseURL: baseURL)
+        #expect(markdown.contains("[Link](https://example.com/path)"))
+    }
+
     @Test func convertNestedElements() throws {
         let html = """
         <html><body>
