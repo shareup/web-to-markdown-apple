@@ -30,7 +30,7 @@ public enum WebPageFetcher {
                 ) { continuation in
                     MainActor.assertIsolated()
                     MainActor.assumeIsolated {
-                        guard state.access({ $0.prepare(with: continuation )}) else {
+                        guard state.access({ $0.prepare(with: continuation) }) else {
                             return
                         }
                         
