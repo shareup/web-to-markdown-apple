@@ -2,14 +2,17 @@ import Foundation
 import Testing
 @testable import WebToMarkdown
 
-@Suite struct HTMLToMarkdownTests {
-    @Test func convertBasicHTML() throws {
+@Suite
+struct HTMLToMarkdownTests {
+    @Test
+    func convertBasicHTML() throws {
         let html = "<html><body><p>Hello, world!</p></body></html>"
         let markdown = try HTMLToMarkdown.convert(html)
         #expect(markdown.contains("Hello, world!"))
     }
 
-    @Test func convertHeadings() throws {
+    @Test
+    func convertHeadings() throws {
         let html = """
         <html><body>
         <h1>Title</h1>
@@ -23,7 +26,8 @@ import Testing
         #expect(markdown.contains("### Section"))
     }
 
-    @Test func convertAllHeadingLevels() throws {
+    @Test
+    func convertAllHeadingLevels() throws {
         let html = """
         <html><body>
         <h1>Level 1</h1>
@@ -43,34 +47,42 @@ import Testing
         #expect(markdown.contains("###### Level 6"))
     }
 
-    @Test func convertBoldAndItalic() throws {
-        let html = "<html><body><p>This is <strong>bold</strong> and <em>italic</em></p></body></html>"
+    @Test
+    func convertBoldAndItalic() throws {
+        let html =
+            "<html><body><p>This is <strong>bold</strong> and <em>italic</em></p></body></html>"
         let markdown = try HTMLToMarkdown.convert(html)
         #expect(markdown.contains("**bold**"))
         #expect(markdown.contains("*italic*"))
     }
 
-    @Test func convertBoldAlternativeTags() throws {
-        let html = "<html><body><p><b>Bold with b</b> and <strong>bold with strong</strong></p></body></html>"
+    @Test
+    func convertBoldAlternativeTags() throws {
+        let html =
+            "<html><body><p><b>Bold with b</b> and <strong>bold with strong</strong></p></body></html>"
         let markdown = try HTMLToMarkdown.convert(html)
         #expect(markdown.contains("**Bold with b**"))
         #expect(markdown.contains("**bold with strong**"))
     }
 
-    @Test func convertItalicAlternativeTags() throws {
-        let html = "<html><body><p><i>Italic with i</i> and <em>italic with em</em></p></body></html>"
+    @Test
+    func convertItalicAlternativeTags() throws {
+        let html =
+            "<html><body><p><i>Italic with i</i> and <em>italic with em</em></p></body></html>"
         let markdown = try HTMLToMarkdown.convert(html)
         #expect(markdown.contains("*Italic with i*"))
         #expect(markdown.contains("*italic with em*"))
     }
 
-    @Test func convertNestedBoldAndItalic() throws {
+    @Test
+    func convertNestedBoldAndItalic() throws {
         let html = "<html><body><p><strong><em>Bold and italic</em></strong></p></body></html>"
         let markdown = try HTMLToMarkdown.convert(html)
         #expect(markdown.contains("***Bold and italic***"))
     }
 
-    @Test func convertLinks() throws {
+    @Test
+    func convertLinks() throws {
         let html = """
         <html><body><a href="https://example.com">Example</a></body></html>
         """
@@ -78,7 +90,8 @@ import Testing
         #expect(markdown.contains("[Example](https://example.com)"))
     }
 
-    @Test func convertRelativeLinks() throws {
+    @Test
+    func convertRelativeLinks() throws {
         let html = """
         <html><body><a href="/path/to/page">Page</a></body></html>
         """
@@ -87,7 +100,8 @@ import Testing
         #expect(markdown.contains("[Page](https://example.com/path/to/page)"))
     }
 
-    @Test func convertRelativeLinksWithPort() throws {
+    @Test
+    func convertRelativeLinksWithPort() throws {
         let html = """
         <html><body><a href="/api/endpoint">API</a></body></html>
         """
@@ -96,7 +110,8 @@ import Testing
         #expect(markdown.contains("[API](https://example.com:8080/api/endpoint)"))
     }
 
-    @Test func convertLinkWithoutHref() throws {
+    @Test
+    func convertLinkWithoutHref() throws {
         let html = """
         <html><body><a>No href</a></body></html>
         """
@@ -105,7 +120,8 @@ import Testing
         #expect(!markdown.contains("["))
     }
 
-    @Test func convertImages() throws {
+    @Test
+    func convertImages() throws {
         let html = """
         <html><body><img src="image.jpg" alt="An image"></body></html>
         """
@@ -113,7 +129,8 @@ import Testing
         #expect(markdown.contains("![An image](image.jpg)"))
     }
 
-    @Test func convertImageWithRelativeURL() throws {
+    @Test
+    func convertImageWithRelativeURL() throws {
         let html = """
         <html><body><img src="/images/photo.png" alt="Photo"></body></html>
         """
@@ -122,7 +139,8 @@ import Testing
         #expect(markdown.contains("![Photo](https://cdn.example.com/images/photo.png)"))
     }
 
-    @Test func convertImageWithoutAlt() throws {
+    @Test
+    func convertImageWithoutAlt() throws {
         let html = """
         <html><body><img src="image.jpg"></body></html>
         """
@@ -130,7 +148,8 @@ import Testing
         #expect(!markdown.contains("!"))
     }
 
-    @Test func convertUnorderedList() throws {
+    @Test
+    func convertUnorderedList() throws {
         let html = """
         <html><body>
         <ul>
@@ -146,7 +165,8 @@ import Testing
         #expect(markdown.contains("- Item 3"))
     }
 
-    @Test func convertOrderedList() throws {
+    @Test
+    func convertOrderedList() throws {
         let html = """
         <html><body>
         <ol>
@@ -162,7 +182,8 @@ import Testing
         #expect(markdown.contains("3. Third"))
     }
 
-    @Test func convertNestedLists() throws {
+    @Test
+    func convertNestedLists() throws {
         let html = """
         <html><body>
         <ul>
@@ -183,7 +204,8 @@ import Testing
         #expect(markdown.contains("- Parent 2"))
     }
 
-    @Test func convertMixedLists() throws {
+    @Test
+    func convertMixedLists() throws {
         let html = """
         <html><body>
         <ol>
@@ -202,13 +224,15 @@ import Testing
         #expect(markdown.contains("Ordered 2"))
     }
 
-    @Test func convertCodeInline() throws {
+    @Test
+    func convertCodeInline() throws {
         let html = "<html><body><p>Use <code>print()</code> function</p></body></html>"
         let markdown = try HTMLToMarkdown.convert(html)
         #expect(markdown.contains("`print()`"))
     }
 
-    @Test func convertCodeBlock() throws {
+    @Test
+    func convertCodeBlock() throws {
         let html = """
         <html><body>
         <pre><code>func hello() {
@@ -221,7 +245,8 @@ import Testing
         #expect(markdown.contains("func hello()"))
     }
 
-    @Test func convertMultipleCodeBlocks() throws {
+    @Test
+    func convertMultipleCodeBlocks() throws {
         let html = """
         <html><body>
         <pre><code>let x = 1</code></pre>
@@ -234,7 +259,8 @@ import Testing
         #expect(codeBlockCount == 4)
     }
 
-    @Test func convertBlockquote() throws {
+    @Test
+    func convertBlockquote() throws {
         let html = """
         <html><body><blockquote>This is a quote</blockquote></body></html>
         """
@@ -242,7 +268,8 @@ import Testing
         #expect(markdown.contains("> This is a quote"))
     }
 
-    @Test func convertMultilineBlockquote() throws {
+    @Test
+    func convertMultilineBlockquote() throws {
         let html = """
         <html><body><blockquote>Line one
         Line two
@@ -253,7 +280,8 @@ import Testing
         #expect(markdown.contains("Line one"))
     }
 
-    @Test func convertTable() throws {
+    @Test
+    func convertTable() throws {
         let html = """
         <html><body>
         <table>
@@ -270,7 +298,8 @@ import Testing
         #expect(markdown.contains("| Bob | 25 |"))
     }
 
-    @Test func convertTableWithUnevenColumns() throws {
+    @Test
+    func convertTableWithUnevenColumns() throws {
         let html = """
         <html><body>
         <table>
@@ -285,7 +314,8 @@ import Testing
         #expect(markdown.contains("| 1 | 2 |  |"))
     }
 
-    @Test func convertComplexTable() throws {
+    @Test
+    func convertComplexTable() throws {
         let html = """
         <html><body>
         <table>
@@ -302,13 +332,15 @@ import Testing
         #expect(markdown.contains("| Gadget | $29.99 | Out of Stock |"))
     }
 
-    @Test func convertHorizontalRule() throws {
+    @Test
+    func convertHorizontalRule() throws {
         let html = "<html><body><p>Before</p><hr><p>After</p></body></html>"
         let markdown = try HTMLToMarkdown.convert(html)
         #expect(markdown.contains("---"))
     }
 
-    @Test func convertBreakTag() throws {
+    @Test
+    func convertBreakTag() throws {
         let html = "<html><body><p>Line 1<br>Line 2<br>Line 3</p></body></html>"
         let markdown = try HTMLToMarkdown.convert(html)
         #expect(markdown.contains("Line 1"))
@@ -316,7 +348,8 @@ import Testing
         #expect(markdown.contains("Line 3"))
     }
 
-    @Test func filterScriptAndStyleTags() throws {
+    @Test
+    func filterScriptAndStyleTags() throws {
         let html = """
         <html>
         <head><style>body { color: red; }</style></head>
@@ -332,7 +365,8 @@ import Testing
         #expect(markdown.contains("Content"))
     }
 
-    @Test func filterNavigationElements() throws {
+    @Test
+    func filterNavigationElements() throws {
         let html = """
         <html><body>
         <nav><a href="/home">Home</a></nav>
@@ -350,7 +384,8 @@ import Testing
         #expect(!markdown.contains("Sidebar"))
     }
 
-    @Test func convertProtocolRelativeURL() throws {
+    @Test
+    func convertProtocolRelativeURL() throws {
         let html = """
         <html><body><a href="//example.com/path">Link</a></body></html>
         """
@@ -358,7 +393,8 @@ import Testing
         #expect(markdown.contains("[Link](//example.com/path)"))
     }
 
-    @Test func convertProtocolRelativeURLWithBaseURL() throws {
+    @Test
+    func convertProtocolRelativeURLWithBaseURL() throws {
         let html = """
         <html><body><a href="//example.com/path">Link</a></body></html>
         """
@@ -367,7 +403,8 @@ import Testing
         #expect(markdown.contains("[Link](https://example.com/path)"))
     }
 
-    @Test func convertNestedElements() throws {
+    @Test
+    func convertNestedElements() throws {
         let html = """
         <html><body>
         <div>
@@ -383,13 +420,15 @@ import Testing
         #expect(markdown.contains("Nested **content**"))
     }
 
-    @Test func handlesMalformedHTML() throws {
+    @Test
+    func handlesMalformedHTML() throws {
         let html = "<html><body>"
         let markdown = try HTMLToMarkdown.convert(html)
         #expect(!markdown.isEmpty || markdown.isEmpty)
     }
 
-    @Test func convertRealWorldBlogPost() throws {
+    @Test
+    func convertRealWorldBlogPost() throws {
         let html = """
         <html><body>
         <article>
@@ -425,7 +464,8 @@ import Testing
         #expect(markdown.contains("[our website](https://example.com)"))
     }
 
-    @Test func convertWikipediaStyleArticle() throws {
+    @Test
+    func convertWikipediaStyleArticle() throws {
         let html = """
         <html><body>
         <h1>Swift Programming Language</h1>
@@ -450,7 +490,8 @@ import Testing
         #expect(markdown.contains("let greeting"))
     }
 
-    @Test func convertRecipeFormat() throws {
+    @Test
+    func convertRecipeFormat() throws {
         let html = """
         <html><body>
         <h1>Chocolate Chip Cookies</h1>
@@ -478,7 +519,8 @@ import Testing
         #expect(markdown.contains("*Yields 24 cookies*"))
     }
 
-    @Test func convertDocumentationPage() throws {
+    @Test
+    func convertDocumentationPage() throws {
         let html = """
         <html><body>
         <h1>API Documentation</h1>
@@ -507,7 +549,8 @@ import Testing
         #expect(markdown.contains("> Note: Always use HTTPS"))
     }
 
-    @Test func convertNewsArticle() throws {
+    @Test
+    func convertNewsArticle() throws {
         let html = """
         <html><body>
         <article>
@@ -533,7 +576,8 @@ import Testing
         #expect(markdown.contains("---"))
     }
 
-    @Test func convertComplexNestedStructure() throws {
+    @Test
+    func convertComplexNestedStructure() throws {
         let html = """
         <html><body>
         <div>
@@ -551,7 +595,8 @@ import Testing
         #expect(markdown.contains("[a link](https://example.com)"))
     }
 
-    @Test func convertEmptyElements() throws {
+    @Test
+    func convertEmptyElements() throws {
         let html = """
         <html><body>
         <p></p>
@@ -560,10 +605,13 @@ import Testing
         </body></html>
         """
         let markdown = try HTMLToMarkdown.convert(html)
-        #expect(markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !markdown.isEmpty)
+        #expect(markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !markdown
+            .isEmpty
+        )
     }
 
-    @Test func convertMixedContentWithWhitespace() throws {
+    @Test
+    func convertMixedContentWithWhitespace() throws {
         let html = """
         <html><body>
 

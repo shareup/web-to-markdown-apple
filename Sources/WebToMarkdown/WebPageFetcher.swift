@@ -3,7 +3,6 @@ import os.log
 import Synchronized
 import WebKit
 
-
 private let log = OSLog(subsystem: "com.shareup.web-to-markdown", category: "web-page-fetcher")
 
 public enum WebPageFetcher {
@@ -12,17 +11,20 @@ public enum WebPageFetcher {
         case timeout
         case noHTML
     }
-    
-    public static func fetchHTML(from url: URL, timeout: TimeInterval = 30) async throws -> String {
+
+    public static func fetchHTML(
+        from url: URL,
+        timeout: TimeInterval = 30
+    ) async throws -> String {
         os_log(
             .info,
             log: log,
             "🔧TOOLCALL🔧 WebPageFetcher: Loading URL: %{public}s",
             url.absoluteString
         )
-        
+
         let state = Locked(State.initial)
-        
+
         return try await withTaskCancellationHandler(
             operation: {
                 try await withCheckedThrowingContinuation(
@@ -33,12 +35,12 @@ public enum WebPageFetcher {
                         guard state.access({ $0.prepare(with: continuation) }) else {
                             return
                         }
-                        
+
                         let config = WKWebViewConfiguration()
                         config.defaultWebpagePreferences.preferredContentMode = .mobile
-                        
+
                         let webView = WKWebView(frame: .zero, configuration: config)
-                        
+
                         let cssScript = WKUserScript(
                             source: """
                             var style = document.createElement('style');
@@ -49,27 +51,27 @@ public enum WebPageFetcher {
                             forMainFrameOnly: true
                         )
                         webView.configuration.userContentController.addUserScript(cssScript)
-                        
+
                         let delegate = NavigationDelegate(
                             webView: webView,
                             state: state,
                             timeout: timeout
                         )
-                        
+
                         state.access { state in
                             state.start(
                                 with: webView,
                                 delegate: delegate
                             )
                         }
-                        
+
                         webView.navigationDelegate = delegate
-                        
+
                         guard !Task.isCancelled else {
                             state.access { $0.cancel() }
                             return
                         }
-                        
+
                         let request = URLRequest(url: url, timeoutInterval: timeout)
                         webView.load(request)
                     }
@@ -126,12 +128,12 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
         self.state = state
         super.init()
 
-        timeoutTask = Task { @MainActor in            
+        timeoutTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
             guard !Task.isCancelled,
                   state.access({ $0.fail(with: WebPageFetcher.Error.timeout) })
             else { return }
-            
+
             os_log(
                 .error,
                 log: log,
@@ -145,7 +147,7 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
         guard state.access({ $0.shouldLoadJavaScript }) else {
             return
         }
-        
+
         os_log(.info, log: log, "🔧TOOLCALL🔧 WebPageFetcher: Page loaded, extracting HTML")
 
         webView
@@ -244,7 +246,7 @@ private enum State: Sendable {
     case inProgress(WKWebView, NavigationDelegate, FetchContinuation)
     case terminal
     case waitingForWebView(FetchContinuation)
-    
+
     mutating func prepare(
         with continuation: FetchContinuation
     ) -> Bool {
@@ -253,23 +255,23 @@ private enum State: Sendable {
             continuation.resume(throwing: CancellationError())
             return false
         }
-        
+
         switch self {
         case .initial:
             self = .waitingForWebView(continuation)
             return true
-            
+
         case .inProgress, .waitingForWebView:
             assertionFailure()
             continuation.resume(throwing: CancellationError())
             return false
-            
+
         case .terminal:
             continuation.resume(throwing: CancellationError())
             return false
         }
     }
-    
+
     mutating func start(
         with webView: WKWebView,
         delegate: NavigationDelegate
@@ -279,39 +281,38 @@ private enum State: Sendable {
         case .initial:
             assertionFailure()
             self = .terminal
-            
+
         case .inProgress:
             assertionFailure()
-            break
-            
+
         case .terminal:
             break
-            
+
         case let .waitingForWebView(continuation):
             self = .inProgress(webView, delegate, continuation)
         }
     }
-    
+
     @MainActor
     mutating func cancel() {
         switch self {
         case .initial:
             self = .terminal
-            
+
         case let .inProgress(webView, _, continuation):
             self = .terminal
             continuation.resume(throwing: CancellationError())
             webView.stopLoading()
-            
+
         case .terminal:
             break
-            
+
         case let .waitingForWebView(continuation):
             self = .terminal
             continuation.resume(throwing: CancellationError())
         }
     }
-    
+
     mutating func finish(with html: String) -> Bool {
         MainActor.assertIsolated()
         switch self {
@@ -319,15 +320,15 @@ private enum State: Sendable {
             assertionFailure()
             self = .terminal
             return false
-            
+
         case let .inProgress(_, _, continuation):
             self = .terminal
             continuation.resume(returning: html)
             return true
-            
+
         case .terminal:
             return false
-            
+
         case let .waitingForWebView(continuation):
             assertionFailure()
             self = .terminal
@@ -335,40 +336,40 @@ private enum State: Sendable {
             return true
         }
     }
-    
+
     @MainActor
     mutating func fail(with error: Swift.Error) -> Bool {
         switch self {
         case .initial:
             self = .terminal
             return true
-            
+
         case let .inProgress(webView, _, continuation):
             self = .terminal
             continuation.resume(throwing: error)
             webView.stopLoading()
             return true
-            
+
         case .terminal:
             return false
-            
+
         case let .waitingForWebView(continuation):
             self = .terminal
             continuation.resume(throwing: error)
             return true
         }
     }
-    
+
     @MainActor
     var shouldLoadJavaScript: Bool {
         switch self {
         case .initial, .terminal:
             return false
-            
+
         case .waitingForWebView:
             assertionFailure()
             return true
-            
+
         case .inProgress:
             return true
         }

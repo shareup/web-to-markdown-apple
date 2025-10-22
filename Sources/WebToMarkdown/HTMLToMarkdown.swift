@@ -53,14 +53,19 @@ public enum HTMLToMarkdown {
 
         case "h1":
             return "\n\n# \(try element.text())\n\n"
+
         case "h2":
             return "\n\n## \(try element.text())\n\n"
+
         case "h3":
             return "\n\n### \(try element.text())\n\n"
+
         case "h4":
             return "\n\n#### \(try element.text())\n\n"
+
         case "h5":
             return "\n\n##### \(try element.text())\n\n"
+
         case "h6":
             return "\n\n###### \(try element.text())\n\n"
 
