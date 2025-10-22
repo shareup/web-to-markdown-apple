@@ -1,5 +1,5 @@
 {
-  "originHash" : "eee5afff74b2be947ce719b5562a26e3705f05d8c566043797e453f2d9957245",
+  "originHash" : "29f942692a59906f7f6904ffc2ae4393c7c327baa5961584e3d6e62e2f2d7ebd",
   "pins" : [
     {
       "identity" : "lrucache",
@@ -35,6 +35,15 @@
       "state" : {
         "revision" : "4206bc7b8bd9a4ff8e9511211e1b4bff979ef9c4",
         "version" : "2.11.1"
+      }
+    },
+    {
+      "identity" : "synchronized",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/shareup/synchronized.git",
+      "state" : {
+        "revision" : "85653e23270ec88ae19f8d494157769487e34aed",
+        "version" : "4.0.1"
       }
     }
   ],
