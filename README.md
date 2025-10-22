@@ -5,8 +5,7 @@ Convert web pages to Markdown using WKWebView and SwiftSoup.
 ## Installation
 
 ```bash
-swift build -c release
-cp .build/release/web-to-markdown /usr/local/bin/
+bin/install.sh
 ```
 
 ## Usage
@@ -32,4 +31,12 @@ let markdown = try HTMLToMarkdown.convert(html, baseURL: url)
 
 ```bash
 swift test
+```
+
+## Development
+
+- Before commiting your code, always format it using:
+
+```bash
+bin/format.sh
 ```
