@@ -26,14 +26,27 @@ public enum WebPageFetcher {
 
     /// Fetch a web page and return HTML plus response metadata.
     ///
-    /// - Parameter extractMainOnly: when `true`, common page chrome (nav,
-    ///   header, footer, cookies, sidebars, related/recommended sections) is
-    ///   stripped from the DOM before the HTML is returned. Cuts noise on
-    ///   listing/article pages dramatically.
+    /// - Parameters:
+    ///   - extractMainOnly: when `true`, common page chrome (nav, header,
+    ///     footer, cookies, sidebars, related/recommended sections) is
+    ///     stripped from the DOM before the HTML is returned.
+    ///   - waitSeconds: extra fixed delay (seconds) after the page finishes
+    ///     loading, before HTML is extracted. Useful for SPAs that hydrate
+    ///     async after `window.load`.
+    ///   - waitForSelector: if non-nil, waits (event-driven via
+    ///     `MutationObserver`) until at least one element matching the CSS
+    ///     selector is present in the DOM, before extraction.
+    ///   - waitForText: if non-nil, waits until the body's visible text
+    ///     contains this substring before extraction.
+    ///
+    /// All wait operations are bounded by the overall `timeout`.
     public static func fetch(
         from url: URL,
         timeout: TimeInterval = 30,
-        extractMainOnly: Bool = false
+        extractMainOnly: Bool = false,
+        waitSeconds: TimeInterval = 0,
+        waitForSelector: String? = nil,
+        waitForText: String? = nil
     ) async throws -> FetchedPage {
         os_log(
             .info,
@@ -75,7 +88,10 @@ public enum WebPageFetcher {
                             webView: webView,
                             state: state,
                             timeout: timeout,
-                            extractMainOnly: extractMainOnly
+                            extractMainOnly: extractMainOnly,
+                            waitSeconds: waitSeconds,
+                            waitForSelector: waitForSelector,
+                            waitForText: waitForText
                         )
 
                         state.access { state in
@@ -115,13 +131,53 @@ public enum WebPageFetcher {
     }
 }
 
-/// JS that removes common chrome from a loaded page (nav, header, footer,
-/// cookie banners, recommendations, sidebars, etc.) and then returns the
-/// stripped outerHTML. Used by `extractMainOnly`.
-private let stripChromeAndExtractJS: String = """
-(function() {
+/// Async JS run via `callAsyncJavaScript` after the page reports `didFinish`.
+/// Optionally waits a fixed number of seconds, then for a selector to appear,
+/// then for body text to contain a substring (event-driven via
+/// `MutationObserver` — no polling). Optionally strips common chrome from the
+/// DOM. Always returns `document.documentElement.outerHTML`.
+///
+/// All `waitFor*` operations are bounded by the outer Swift-side `timeout`,
+/// which fails the fetch if the JS never resolves.
+private let extractJS: String = #"""
+if (typeof waitSeconds === "number" && waitSeconds > 0) {
+  await new Promise(function(r) { setTimeout(r, waitSeconds * 1000); });
+}
+
+if (typeof waitForSelector === "string" && waitForSelector.length > 0) {
+  await new Promise(function(resolve) {
+    function check() {
+      try { return document.querySelector(waitForSelector); }
+      catch (e) { return null; }
+    }
+    if (check()) { resolve(); return; }
+    var obs = new MutationObserver(function() {
+      if (check()) { obs.disconnect(); resolve(); }
+    });
+    obs.observe(document.documentElement, { childList: true, subtree: true });
+  });
+}
+
+if (typeof waitForText === "string" && waitForText.length > 0) {
+  await new Promise(function(resolve) {
+    function hasText() {
+      var body = document.body;
+      if (!body) return false;
+      var t = body.innerText || body.textContent || "";
+      return t.indexOf(waitForText) !== -1;
+    }
+    if (hasText()) { resolve(); return; }
+    var target = document.body || document.documentElement;
+    var obs = new MutationObserver(function() {
+      if (hasText()) { obs.disconnect(); resolve(); }
+    });
+    obs.observe(target, { childList: true, subtree: true, characterData: true });
+  });
+}
+
+if (extractMainOnly) {
   var selectors = [
-    'nav', 'header', 'footer', 'aside',
+    "nav", "header", "footer", "aside",
     '[role="banner"]', '[role="contentinfo"]', '[role="navigation"]',
     '[role="complementary"]',
     '[id*="cookie" i]', '[class*="cookie" i]',
@@ -131,24 +187,26 @@ private let stripChromeAndExtractJS: String = """
     '[class*="related" i]', '[class*="recommend" i]',
     '[class*="sidebar" i]', '[id*="sidebar" i]',
     '[id*="banner" i]', '[class*="promo" i]',
-    'noscript', 'script[src]', 'style'
+    "noscript", "script[src]", "style"
   ];
   selectors.forEach(function(sel) {
     try {
       document.querySelectorAll(sel).forEach(function(el) { el.remove(); });
     } catch (e) {}
   });
-  return document.documentElement.outerHTML;
-})()
-"""
+}
 
-private let extractJS = "document.documentElement.outerHTML"
+return document.documentElement.outerHTML;
+"""#
 
 @MainActor
 private final class NavigationDelegate: NSObject, WKNavigationDelegate {
     let webView: WKWebView
     let state: Locked<State>
     let extractMainOnly: Bool
+    let waitSeconds: TimeInterval
+    let waitForSelector: String?
+    let waitForText: String?
     var timeoutTask: Task<Void, Never>?
     var capturedStatusCode: Int?
 
@@ -156,11 +214,17 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
         webView: WKWebView,
         state: Locked<State>,
         timeout: TimeInterval,
-        extractMainOnly: Bool
+        extractMainOnly: Bool,
+        waitSeconds: TimeInterval,
+        waitForSelector: String?,
+        waitForText: String?
     ) {
         self.webView = webView
         self.state = state
         self.extractMainOnly = extractMainOnly
+        self.waitSeconds = waitSeconds
+        self.waitForSelector = waitForSelector
+        self.waitForText = waitForText
         super.init()
 
         timeoutTask = Task { @MainActor in
@@ -201,47 +265,59 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
 
         os_log(.info, log: log, "🔧TOOLCALL🔧 WebPageFetcher: Page loaded, extracting HTML")
 
-        let js = extractMainOnly ? stripChromeAndExtractJS : extractJS
         let finalURL = webView.url
         let status = capturedStatusCode
 
-        webView.evaluateJavaScript(js) { [weak self] result, error in
+        let arguments: [String: Any] = [
+            "waitSeconds": waitSeconds,
+            "waitForSelector": waitForSelector ?? NSNull(),
+            "waitForText": waitForText ?? NSNull(),
+            "extractMainOnly": extractMainOnly,
+        ]
+
+        Task { @MainActor [weak self] in
             guard let self else { return }
-
-            timeoutTask?.cancel()
-
-            if let error, state.access({ $0.fail(with: error) }) {
-                os_log(
-                    .error,
-                    log: log,
-                    "🔧TOOLCALL🔧 WebPageFetcher: JavaScript error: %{public}s",
-                    error.localizedDescription
+            do {
+                let result = try await webView.callAsyncJavaScript(
+                    extractJS,
+                    arguments: arguments,
+                    contentWorld: .page
                 )
-                return
-            }
 
-            guard let html = result as? String else {
-                if state.access({ $0.fail(with: WebPageFetcher.Error.noHTML) }) {
+                timeoutTask?.cancel()
+
+                guard let html = result as? String else {
+                    if state.access({ $0.fail(with: WebPageFetcher.Error.noHTML) }) {
+                        os_log(
+                            .error,
+                            log: log,
+                            "🔧TOOLCALL🔧 WebPageFetcher: No HTML returned"
+                        )
+                    }
+                    return
+                }
+
+                let resolved = finalURL ?? webView.url ?? URL(string: "about:blank")!
+                let page = FetchedPage(html: html, statusCode: status, finalURL: resolved)
+
+                _ = state.access { $0.finish(with: page) }
+
+                os_log(
+                    .info,
+                    log: log,
+                    "🔧TOOLCALL🔧 WebPageFetcher: Extracted HTML of length: %d",
+                    html.count
+                )
+            } catch {
+                if state.access({ $0.fail(with: error) }) {
                     os_log(
                         .error,
                         log: log,
-                        "🔧TOOLCALL🔧 WebPageFetcher: No HTML returned"
+                        "🔧TOOLCALL🔧 WebPageFetcher: JavaScript error: %{public}s",
+                        error.localizedDescription
                     )
                 }
-                return
             }
-
-            let resolved = finalURL ?? webView.url ?? URL(string: "about:blank")!
-            let page = FetchedPage(html: html, statusCode: status, finalURL: resolved)
-
-            _ = state.access { $0.finish(with: page) }
-
-            os_log(
-                .info,
-                log: log,
-                "🔧TOOLCALL🔧 WebPageFetcher: Extracted HTML of length: %d",
-                html.count
-            )
         }
     }
 

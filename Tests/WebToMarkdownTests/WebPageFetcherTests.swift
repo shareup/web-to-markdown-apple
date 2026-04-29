@@ -28,6 +28,54 @@ struct WebPageFetcherTests {
     }
 
     @Test
+    func fetchReturnsStatusAndFinalURL() async throws {
+        let url = URL(string: "https://example.com")!
+        let page = try await WebPageFetcher.fetch(from: url)
+        #expect(page.statusCode == 200)
+        #expect(page.finalURL.host == "example.com")
+        #expect(!page.html.isEmpty)
+    }
+
+    @Test
+    func waitForExistingSelectorReturnsImmediately() async throws {
+        let url = URL(string: "https://example.com")!
+        let start = Date()
+        let page = try await WebPageFetcher.fetch(
+            from: url,
+            timeout: 10,
+            waitForSelector: "h1"
+        )
+        let elapsed = Date().timeIntervalSince(start)
+        #expect(!page.html.isEmpty)
+        #expect(elapsed < 5, "Selector that already exists should not delay extraction")
+    }
+
+    @Test
+    func waitForNonexistentSelectorTimesOut() async throws {
+        let url = URL(string: "https://example.com")!
+        await #expect(throws: WebPageFetcher.Error.self) {
+            try await WebPageFetcher.fetch(
+                from: url,
+                timeout: 3,
+                waitForSelector: ".never-matches-xyz-12345"
+            )
+        }
+    }
+
+    @Test
+    func fixedWaitDelaysExtraction() async throws {
+        let url = URL(string: "https://example.com")!
+        let start = Date()
+        _ = try await WebPageFetcher.fetch(
+            from: url,
+            timeout: 10,
+            waitSeconds: 1.0
+        )
+        let elapsed = Date().timeIntervalSince(start)
+        #expect(elapsed >= 1.0, "Fixed wait should add at least its duration")
+    }
+
+    @Test
     func canCancelFetch() async throws {
         let url = URL(string: "https://example.com")!
         let loadTask = Task.detached {

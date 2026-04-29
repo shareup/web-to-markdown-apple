@@ -36,6 +36,24 @@ struct WebToMarkdownCommand: AsyncParsableCommand {
     )
     var skipFrontmatter: Bool = false
 
+    @Option(
+        name: .long,
+        help: "Wait this many seconds (decimal allowed) after the page loads, before extracting. Bounded by --timeout."
+    )
+    var wait: Double = 0
+
+    @Option(
+        name: .long,
+        help: "Wait until at least one element matches this CSS selector before extracting. MutationObserver-driven, bounded by --timeout."
+    )
+    var waitFor: String?
+
+    @Option(
+        name: .long,
+        help: "Wait until the body's visible text contains this substring before extracting. MutationObserver-driven, bounded by --timeout."
+    )
+    var waitForText: String?
+
     mutating func run() async throws {
         guard let parsedURL = URL(string: url) else {
             throw ValidationError("Invalid URL: \(url)")
@@ -48,7 +66,10 @@ struct WebToMarkdownCommand: AsyncParsableCommand {
         let page = try await WebPageFetcher.fetch(
             from: parsedURL,
             timeout: timeout,
-            extractMainOnly: main
+            extractMainOnly: main,
+            waitSeconds: wait,
+            waitForSelector: waitFor,
+            waitForText: waitForText
         )
 
         if !skipFrontmatter {
