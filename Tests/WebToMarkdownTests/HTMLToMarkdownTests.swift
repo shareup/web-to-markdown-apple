@@ -3,6 +3,106 @@ import Testing
 @testable import WebToMarkdown
 
 @Suite
+struct FrontmatterTests {
+    private func makePage(
+        url: String = "https://example.com/",
+        status: Int? = 200,
+        html: String = "<html></html>"
+    ) -> FetchedPage {
+        FetchedPage(html: html, statusCode: status, finalURL: URL(string: url)!)
+    }
+
+    private let fixedDate = Date(timeIntervalSince1970: 1_700_000_000) // 2023-11-14T22:13:20Z
+
+    @Test
+    func formatsAllFields() {
+        let page = makePage()
+        let meta = PageMetadata(title: "Hello", description: "A description.")
+        let fm = Frontmatter(page: page, metadata: meta, fetchedAt: fixedDate)
+        let out = fm.format()
+        #expect(out.hasPrefix("---\n"))
+        #expect(out.hasSuffix("\n---"))
+        #expect(out.contains("status: 200"))
+        // URL contains ':' so it gets quoted.
+        #expect(out.contains("final-url: \"https://example.com/\""))
+        #expect(out.contains("title: Hello"))
+        #expect(out.contains("description: A description."))
+        #expect(out.contains("fetched-at: 2023-11-14T22:13:20Z"))
+    }
+
+    @Test
+    func omitsAbsentMetadata() {
+        let page = makePage()
+        let meta = PageMetadata(title: nil, description: nil)
+        let out = Frontmatter(page: page, metadata: meta, fetchedAt: fixedDate).format()
+        #expect(!out.contains("title:"))
+        #expect(!out.contains("description:"))
+    }
+
+    @Test
+    func omitsAbsentStatus() {
+        let page = makePage(status: nil)
+        let meta = PageMetadata(title: "x", description: nil)
+        let out = Frontmatter(page: page, metadata: meta, fetchedAt: fixedDate).format()
+        #expect(!out.contains("status:"))
+    }
+
+    @Test
+    func quotesValuesWithColons() {
+        let escaped = Frontmatter.yamlEscape("Foo: Bar")
+        #expect(escaped == "\"Foo: Bar\"")
+    }
+
+    @Test
+    func quotesValuesWithQuotes() {
+        let escaped = Frontmatter.yamlEscape("She said \"hi\"")
+        #expect(escaped == "\"She said \\\"hi\\\"\"")
+    }
+
+    @Test
+    func quotesValuesWithBackslash() {
+        let escaped = Frontmatter.yamlEscape("path\\to")
+        #expect(escaped == "\"path\\\\to\"")
+    }
+
+    @Test
+    func quotesValuesWithHash() {
+        let escaped = Frontmatter.yamlEscape("foo #bar")
+        #expect(escaped == "\"foo #bar\"")
+    }
+
+    @Test
+    func quotesEmptyAndWhitespacePadded() {
+        #expect(Frontmatter.yamlEscape("") == "\"\"")
+        #expect(Frontmatter.yamlEscape(" leading") == "\" leading\"")
+        #expect(Frontmatter.yamlEscape("trailing ") == "\"trailing \"")
+    }
+
+    @Test
+    func flattensNewlinesInValues() {
+        let escaped = Frontmatter.yamlEscape("line one\nline two")
+        // No colon/quote/backslash/hash, so no quoting; just a flattened space.
+        #expect(escaped == "line one line two")
+    }
+
+    @Test
+    func leavesPlainValuesAlone() {
+        #expect(Frontmatter.yamlEscape("Hello world") == "Hello world")
+        #expect(Frontmatter.yamlEscape("plain-value-123") == "plain-value-123")
+    }
+
+    @Test
+    func truncatesLongDescription() {
+        let longDesc = String(repeating: "a", count: 250)
+        let page = makePage()
+        let meta = PageMetadata(title: nil, description: longDesc)
+        let out = Frontmatter(page: page, metadata: meta, fetchedAt: fixedDate).format()
+        // Description should be exactly 200 chars + "…" (default max).
+        #expect(out.contains("description: " + String(repeating: "a", count: 200) + "…"))
+    }
+}
+
+@Suite
 struct PageMetadataTests {
     @Test
     func extractsTitleFromTitleTag() throws {

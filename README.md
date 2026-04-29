@@ -15,7 +15,7 @@ web-to-markdown https://example.com
 web-to-markdown https://example.com --timeout 30 --verbose
 ```
 
-By default the output is a fake-YAML frontmatter block followed by the body
+By default the output is a YAML frontmatter block followed by the body
 markdown:
 
 ```
@@ -65,25 +65,32 @@ text that only appears after meaningful hydration, and use it as the anchor.
 ```swift
 import WebToMarkdown
 
-// Fetch a page with full metadata
-let page = try await WebPageFetcher.fetch(
-    from: url,
-    timeout: 30,
-    extractMainOnly: false,
-    waitSeconds: 0,
-    waitForSelector: nil,
-    waitForText: nil
-)
-// page.html, page.statusCode, page.finalURL
+// Fetch a page (defaults to a 30s timeout, no waits, no chrome stripping).
+let page = try await WebPageFetcher.fetch(from: url)
 
-// Convert HTML to Markdown
+// Same fetch with all knobs available, via FetchOptions.
+var options = FetchOptions()
+options.extractMainOnly = true
+options.waitSeconds = 0.5
+options.waitForSelector = "#subscribe-button"
+options.timeout = 20
+let richPage = try await WebPageFetcher.fetch(from: url, options: options)
+
+// page.html, page.statusCode, page.finalURL — all on FetchedPage.
+print(page.statusCode ?? -1, page.finalURL)
+
+// Convert HTML to Markdown.
 let markdown = try HTMLToMarkdown.convert(page.html, baseURL: page.finalURL)
 
-// Extract <title> and meta description
+// Extract <title> and meta description as Swift values.
 let metadata = try HTMLToMarkdown.extractMetadata(page.html)
-// metadata.title, metadata.description
+print(metadata.title ?? "", metadata.description ?? "")
 
-// Backwards-compatible HTML-only fetch
+// Build the same YAML frontmatter the CLI emits.
+let frontmatter = Frontmatter(page: page, metadata: metadata).format()
+print(frontmatter)
+
+// Backwards-compatible HTML-only fetch.
 let html = try await WebPageFetcher.fetchHTML(from: url, timeout: 30)
 ```
 

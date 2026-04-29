@@ -17,6 +17,47 @@ public struct FetchedPage: Sendable {
     }
 }
 
+/// All optional knobs a caller can tweak when fetching a page. Use the
+/// default-initialized value for the simple case, then mutate the fields you
+/// care about, or pass them at the init site.
+public struct FetchOptions: Sendable {
+    /// Overall fetch timeout, seconds. The fetch fails if everything
+    /// (loading + waits + extraction) doesn't complete by this deadline.
+    public var timeout: TimeInterval = 30
+
+    /// Strip page chrome (nav/header/footer/cookie/sidebar/recommended)
+    /// before HTML extraction.
+    public var extractMainOnly: Bool = false
+
+    /// Fixed delay (seconds) after the page finishes loading, before HTML is
+    /// extracted. Useful for SPAs that hydrate after `window.load`.
+    public var waitSeconds: TimeInterval = 0
+
+    /// CSS selector to wait for. Extraction is delayed until at least one
+    /// element matches. Event-driven via `MutationObserver`. Bounded by
+    /// `timeout`.
+    public var waitForSelector: String?
+
+    /// Substring to wait for in the body's visible text. Extraction is
+    /// delayed until found. Event-driven via `MutationObserver`. Bounded by
+    /// `timeout`.
+    public var waitForText: String?
+
+    public init(
+        timeout: TimeInterval = 30,
+        extractMainOnly: Bool = false,
+        waitSeconds: TimeInterval = 0,
+        waitForSelector: String? = nil,
+        waitForText: String? = nil
+    ) {
+        self.timeout = timeout
+        self.extractMainOnly = extractMainOnly
+        self.waitSeconds = waitSeconds
+        self.waitForSelector = waitForSelector
+        self.waitForText = waitForText
+    }
+}
+
 public enum WebPageFetcher {
     public enum Error: Swift.Error {
         case loadFailed(String)
@@ -26,20 +67,24 @@ public enum WebPageFetcher {
 
     /// Fetch a web page and return HTML plus response metadata.
     ///
-    /// - Parameters:
-    ///   - extractMainOnly: when `true`, common page chrome (nav, header,
-    ///     footer, cookies, sidebars, related/recommended sections) is
-    ///     stripped from the DOM before the HTML is returned.
-    ///   - waitSeconds: extra fixed delay (seconds) after the page finishes
-    ///     loading, before HTML is extracted. Useful for SPAs that hydrate
-    ///     async after `window.load`.
-    ///   - waitForSelector: if non-nil, waits (event-driven via
-    ///     `MutationObserver`) until at least one element matching the CSS
-    ///     selector is present in the DOM, before extraction.
-    ///   - waitForText: if non-nil, waits until the body's visible text
-    ///     contains this substring before extraction.
-    ///
-    /// All wait operations are bounded by the overall `timeout`.
+    /// See ``FetchOptions`` for the available knobs.
+    public static func fetch(
+        from url: URL,
+        options: FetchOptions = FetchOptions()
+    ) async throws -> FetchedPage {
+        try await fetch(
+            from: url,
+            timeout: options.timeout,
+            extractMainOnly: options.extractMainOnly,
+            waitSeconds: options.waitSeconds,
+            waitForSelector: options.waitForSelector,
+            waitForText: options.waitForText
+        )
+    }
+
+    /// Fetch a web page using individual parameters. Equivalent to passing a
+    /// ``FetchOptions`` value; this overload keeps existing call sites
+    /// working without adapter code.
     public static func fetch(
         from url: URL,
         timeout: TimeInterval = 30,

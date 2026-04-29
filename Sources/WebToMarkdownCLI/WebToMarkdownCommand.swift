@@ -63,8 +63,7 @@ struct WebToMarkdownCommand: AsyncParsableCommand {
             fputs("Fetching \(parsedURL.absoluteString)...\n", stderr)
         }
 
-        let page = try await WebPageFetcher.fetch(
-            from: parsedURL,
+        let options = FetchOptions(
             timeout: timeout,
             extractMainOnly: main,
             waitSeconds: wait,
@@ -72,10 +71,12 @@ struct WebToMarkdownCommand: AsyncParsableCommand {
             waitForText: waitForText
         )
 
+        let page = try await WebPageFetcher.fetch(from: parsedURL, options: options)
+
         if !skipFrontmatter {
             let metadata = (try? HTMLToMarkdown.extractMetadata(page.html))
                 ?? PageMetadata(title: nil, description: nil)
-            print(formatFrontmatter(page: page, metadata: metadata))
+            print(Frontmatter(page: page, metadata: metadata).format())
             if !head { print("") }
         }
 
@@ -87,57 +88,5 @@ struct WebToMarkdownCommand: AsyncParsableCommand {
 
         let markdown = try HTMLToMarkdown.convert(page.html, baseURL: parsedURL)
         print(markdown)
-    }
-
-    private func formatFrontmatter(page: FetchedPage, metadata: PageMetadata) -> String {
-        var lines = ["---"]
-        if let status = page.statusCode {
-            lines.append("status: \(status)")
-        }
-        lines.append("final-url: \(yamlEscape(page.finalURL.absoluteString))")
-        if let title = metadata.title, !title.isEmpty {
-            lines.append("title: \(yamlEscape(title))")
-        }
-        if let description = metadata.description, !description.isEmpty {
-            lines.append("description: \(yamlEscape(truncate(description, max: 200)))")
-        }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        lines.append("fetched-at: \(formatter.string(from: Date()))")
-        lines.append("---")
-        return lines.joined(separator: "\n")
-    }
-
-    /// Escape a string for use as a fake-YAML frontmatter scalar value.
-    /// Quotes the value when it contains characters that would confuse a
-    /// downstream YAML reader (`:`, `"`, `\\`, leading/trailing whitespace).
-    /// Newlines are flattened to spaces — frontmatter is single-line per key.
-    private func yamlEscape(_ value: String) -> String {
-        let flattened = value
-            .replacingOccurrences(of: "\r\n", with: " ")
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-
-        let needsQuoting = flattened.contains(":")
-            || flattened.contains("\"")
-            || flattened.contains("\\")
-            || flattened.contains("#")
-            || flattened.first == " "
-            || flattened.last == " "
-            || flattened.isEmpty
-
-        if needsQuoting {
-            let escaped = flattened
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-            return "\"\(escaped)\""
-        }
-        return flattened
-    }
-
-    private func truncate(_ s: String, max: Int) -> String {
-        if s.count <= max { return s }
-        let end = s.index(s.startIndex, offsetBy: max)
-        return String(s[s.startIndex ..< end]) + "…"
     }
 }
