@@ -5,6 +5,18 @@ import WebKit
 
 private let log = OSLog(subsystem: "com.shareup.web-to-markdown", category: "web-page-fetcher")
 
+public struct FetchedPage: Sendable {
+    public let html: String
+    public let statusCode: Int?
+    public let finalURL: URL
+
+    public init(html: String, statusCode: Int?, finalURL: URL) {
+        self.html = html
+        self.statusCode = statusCode
+        self.finalURL = finalURL
+    }
+}
+
 public enum WebPageFetcher {
     public enum Error: Swift.Error {
         case loadFailed(String)
@@ -12,10 +24,17 @@ public enum WebPageFetcher {
         case noHTML
     }
 
-    public static func fetchHTML(
+    /// Fetch a web page and return HTML plus response metadata.
+    ///
+    /// - Parameter extractMainOnly: when `true`, common page chrome (nav,
+    ///   header, footer, cookies, sidebars, related/recommended sections) is
+    ///   stripped from the DOM before the HTML is returned. Cuts noise on
+    ///   listing/article pages dramatically.
+    public static func fetch(
         from url: URL,
-        timeout: TimeInterval = 30
-    ) async throws -> String {
+        timeout: TimeInterval = 30,
+        extractMainOnly: Bool = false
+    ) async throws -> FetchedPage {
         os_log(
             .info,
             log: log,
@@ -55,7 +74,8 @@ public enum WebPageFetcher {
                         let delegate = NavigationDelegate(
                             webView: webView,
                             state: state,
-                            timeout: timeout
+                            timeout: timeout,
+                            extractMainOnly: extractMainOnly
                         )
 
                         state.access { state in
@@ -78,32 +98,6 @@ public enum WebPageFetcher {
                 }
             },
             onCancel: {
-                // NOTE: Even though `isolation: MainActor.shared` is specified
-                //       below, neither `operation` nor `onCancel` are called
-                //       on `MainActor` if they weren't already running on
-                //       `MainActor`.
-                //
-                //       I'm no Swift Foundation engineer, but it doesn't seem
-                //       like `isolation` is used anywhere in the current version
-                //       of `withTaskCancellationHandler()`:
-                //
-                //       ```
-                //       public func withTaskCancellationHandler<T>(
-                //         operation: () async throws -> T,
-                //         onCancel handler: @Sendable () -> Void,
-                //         isolation: isolated (any Actor)? = #isolation
-                //       ) async rethrows -> T {
-                //         // unconditionally add the cancellation record to the task.
-                //         // if the task was already cancelled, it will be executed right away.
-                //         let record = unsafe _taskAddCancellationHandler(handler: handler)
-                //         defer { unsafe _taskRemoveCancellationHandler(record: record) }
-                //
-                //
-                //         return try await operation()
-                //       }
-                //       ```
-                //
-                //       https://github.com/swiftlang/swift/blob/5d480ef063859a0f459f4149df536db4fb330a50/stdlib/public/Concurrency/TaskCancellation.swift#L73-L84
                 Task { @MainActor in
                     state.access { $0.cancel() }
                 }
@@ -111,21 +105,62 @@ public enum WebPageFetcher {
             isolation: MainActor.shared
         )
     }
+
+    /// Backwards-compatible wrapper returning just HTML.
+    public static func fetchHTML(
+        from url: URL,
+        timeout: TimeInterval = 30
+    ) async throws -> String {
+        try await fetch(from: url, timeout: timeout).html
+    }
 }
+
+/// JS that removes common chrome from a loaded page (nav, header, footer,
+/// cookie banners, recommendations, sidebars, etc.) and then returns the
+/// stripped outerHTML. Used by `extractMainOnly`.
+private let stripChromeAndExtractJS: String = """
+(function() {
+  var selectors = [
+    'nav', 'header', 'footer', 'aside',
+    '[role="banner"]', '[role="contentinfo"]', '[role="navigation"]',
+    '[role="complementary"]',
+    '[id*="cookie" i]', '[class*="cookie" i]',
+    '[id*="consent" i]', '[class*="consent" i]',
+    '[id*="newsletter" i]', '[class*="newsletter" i]',
+    '[id*="subscribe" i]', '[class*="subscribe" i]',
+    '[class*="related" i]', '[class*="recommend" i]',
+    '[class*="sidebar" i]', '[id*="sidebar" i]',
+    '[id*="banner" i]', '[class*="promo" i]',
+    'noscript', 'script[src]', 'style'
+  ];
+  selectors.forEach(function(sel) {
+    try {
+      document.querySelectorAll(sel).forEach(function(el) { el.remove(); });
+    } catch (e) {}
+  });
+  return document.documentElement.outerHTML;
+})()
+"""
+
+private let extractJS = "document.documentElement.outerHTML"
 
 @MainActor
 private final class NavigationDelegate: NSObject, WKNavigationDelegate {
     let webView: WKWebView
     let state: Locked<State>
+    let extractMainOnly: Bool
     var timeoutTask: Task<Void, Never>?
+    var capturedStatusCode: Int?
 
     init(
         webView: WKWebView,
         state: Locked<State>,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        extractMainOnly: Bool
     ) {
         self.webView = webView
         self.state = state
+        self.extractMainOnly = extractMainOnly
         super.init()
 
         timeoutTask = Task { @MainActor in
@@ -143,6 +178,22 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
         }
     }
 
+    func webView(
+        _: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse
+    ) async -> WKNavigationResponsePolicy {
+        if let httpResponse = navigationResponse.response as? HTTPURLResponse {
+            capturedStatusCode = httpResponse.statusCode
+            os_log(
+                .info,
+                log: log,
+                "🔧TOOLCALL🔧 WebPageFetcher: Response status: %d",
+                httpResponse.statusCode
+            )
+        }
+        return .allow
+    }
+
     func webView(_ webView: WKWebView, didFinish _: WKNavigation!) {
         guard state.access({ $0.shouldLoadJavaScript }) else {
             return
@@ -150,42 +201,48 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
 
         os_log(.info, log: log, "🔧TOOLCALL🔧 WebPageFetcher: Page loaded, extracting HTML")
 
-        webView
-            .evaluateJavaScript("document.documentElement.outerHTML") { [weak self] result, error in
-                guard let self else { return }
+        let js = extractMainOnly ? stripChromeAndExtractJS : extractJS
+        let finalURL = webView.url
+        let status = capturedStatusCode
 
-                timeoutTask?.cancel()
+        webView.evaluateJavaScript(js) { [weak self] result, error in
+            guard let self else { return }
 
-                if let error, state.access({ $0.fail(with: error) }) {
+            timeoutTask?.cancel()
+
+            if let error, state.access({ $0.fail(with: error) }) {
+                os_log(
+                    .error,
+                    log: log,
+                    "🔧TOOLCALL🔧 WebPageFetcher: JavaScript error: %{public}s",
+                    error.localizedDescription
+                )
+                return
+            }
+
+            guard let html = result as? String else {
+                if state.access({ $0.fail(with: WebPageFetcher.Error.noHTML) }) {
                     os_log(
                         .error,
                         log: log,
-                        "🔧TOOLCALL🔧 WebPageFetcher: JavaScript error: %{public}s",
-                        error.localizedDescription
+                        "🔧TOOLCALL🔧 WebPageFetcher: No HTML returned"
                     )
-                    return
                 }
-
-                guard let html = result as? String,
-                      state.access({ $0.finish(with: html) })
-                else {
-                    if state.access({ $0.fail(with: WebPageFetcher.Error.noHTML) }) {
-                        os_log(
-                            .error,
-                            log: log,
-                            "🔧TOOLCALL🔧 WebPageFetcher: No HTML returned"
-                        )
-                    }
-                    return
-                }
-
-                os_log(
-                    .info,
-                    log: log,
-                    "🔧TOOLCALL🔧 WebPageFetcher: Extracted HTML of length: %d",
-                    html.count
-                )
+                return
             }
+
+            let resolved = finalURL ?? webView.url ?? URL(string: "about:blank")!
+            let page = FetchedPage(html: html, statusCode: status, finalURL: resolved)
+
+            _ = state.access { $0.finish(with: page) }
+
+            os_log(
+                .info,
+                log: log,
+                "🔧TOOLCALL🔧 WebPageFetcher: Extracted HTML of length: %d",
+                html.count
+            )
+        }
     }
 
     func webView(_: WKWebView, didFail _: WKNavigation!, withError error: Swift.Error) {
@@ -240,7 +297,7 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
     }
 }
 
-private typealias FetchContinuation = CheckedContinuation<String, Swift.Error>
+private typealias FetchContinuation = CheckedContinuation<FetchedPage, Swift.Error>
 private enum State: Sendable {
     case initial
     case inProgress(WKWebView, NavigationDelegate, FetchContinuation)
@@ -313,7 +370,7 @@ private enum State: Sendable {
         }
     }
 
-    mutating func finish(with html: String) -> Bool {
+    mutating func finish(with page: FetchedPage) -> Bool {
         MainActor.assertIsolated()
         switch self {
         case .initial:
@@ -323,7 +380,7 @@ private enum State: Sendable {
 
         case let .inProgress(_, _, continuation):
             self = .terminal
-            continuation.resume(returning: html)
+            continuation.resume(returning: page)
             return true
 
         case .terminal:
@@ -332,7 +389,7 @@ private enum State: Sendable {
         case let .waitingForWebView(continuation):
             assertionFailure()
             self = .terminal
-            continuation.resume(returning: html)
+            continuation.resume(returning: page)
             return true
         }
     }

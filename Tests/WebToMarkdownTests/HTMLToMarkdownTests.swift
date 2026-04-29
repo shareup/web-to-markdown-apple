@@ -3,6 +3,94 @@ import Testing
 @testable import WebToMarkdown
 
 @Suite
+struct PageMetadataTests {
+    @Test
+    func extractsTitleFromTitleTag() throws {
+        let html = "<html><head><title>My Page</title></head><body>x</body></html>"
+        let meta = try HTMLToMarkdown.extractMetadata(html)
+        #expect(meta.title == "My Page")
+    }
+
+    @Test
+    func fallsBackToOgTitleWhenNoTitleTag() throws {
+        let html = """
+        <html><head>
+        <meta property="og:title" content="OG Title Here">
+        </head><body>x</body></html>
+        """
+        let meta = try HTMLToMarkdown.extractMetadata(html)
+        #expect(meta.title == "OG Title Here")
+    }
+
+    @Test
+    func prefersTitleTagOverOgTitle() throws {
+        let html = """
+        <html><head>
+        <title>Real Title</title>
+        <meta property="og:title" content="OG Title">
+        </head><body>x</body></html>
+        """
+        let meta = try HTMLToMarkdown.extractMetadata(html)
+        #expect(meta.title == "Real Title")
+    }
+
+    @Test
+    func extractsMetaDescription() throws {
+        let html = """
+        <html><head>
+        <meta name="description" content="A nice description.">
+        </head><body>x</body></html>
+        """
+        let meta = try HTMLToMarkdown.extractMetadata(html)
+        #expect(meta.description == "A nice description.")
+    }
+
+    @Test
+    func fallsBackToOgDescription() throws {
+        let html = """
+        <html><head>
+        <meta property="og:description" content="OG description fallback.">
+        </head><body>x</body></html>
+        """
+        let meta = try HTMLToMarkdown.extractMetadata(html)
+        #expect(meta.description == "OG description fallback.")
+    }
+
+    @Test
+    func returnsNilWhenMetadataMissing() throws {
+        let html = "<html><body>just body</body></html>"
+        let meta = try HTMLToMarkdown.extractMetadata(html)
+        #expect(meta.title == nil)
+        #expect(meta.description == nil)
+    }
+
+    @Test
+    func trimsWhitespaceInExtractedValues() throws {
+        let html = """
+        <html><head>
+        <title>   Spaced Title   </title>
+        <meta name="description" content="  spaced description  ">
+        </head><body>x</body></html>
+        """
+        let meta = try HTMLToMarkdown.extractMetadata(html)
+        #expect(meta.title == "Spaced Title")
+        #expect(meta.description == "spaced description")
+    }
+
+    @Test
+    func ignoresEmptyTitleTag() throws {
+        let html = """
+        <html><head>
+        <title></title>
+        <meta property="og:title" content="OG Backup">
+        </head><body>x</body></html>
+        """
+        let meta = try HTMLToMarkdown.extractMetadata(html)
+        #expect(meta.title == "OG Backup")
+    }
+}
+
+@Suite
 struct HTMLToMarkdownTests {
     @Test
     func convertBasicHTML() throws {
