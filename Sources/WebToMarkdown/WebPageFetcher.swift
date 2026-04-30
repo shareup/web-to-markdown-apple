@@ -43,18 +43,26 @@ public struct FetchOptions: Sendable {
     /// `timeout`.
     public var waitForText: String?
 
+    /// When `true`, log every per-navigation event (including iframes,
+    /// `about:blank`, redirects). Off by default — the noise scales badly on
+    /// chrome-heavy pages. Errors and one-shot lifecycle events (loading,
+    /// response status, page loaded, extracted length) always log.
+    public var verbose: Bool = false
+
     public init(
         timeout: TimeInterval = 30,
         extractMainOnly: Bool = false,
         waitSeconds: TimeInterval = 0,
         waitForSelector: String? = nil,
-        waitForText: String? = nil
+        waitForText: String? = nil,
+        verbose: Bool = false
     ) {
         self.timeout = timeout
         self.extractMainOnly = extractMainOnly
         self.waitSeconds = waitSeconds
         self.waitForSelector = waitForSelector
         self.waitForText = waitForText
+        self.verbose = verbose
     }
 }
 
@@ -78,7 +86,8 @@ public enum WebPageFetcher {
             extractMainOnly: options.extractMainOnly,
             waitSeconds: options.waitSeconds,
             waitForSelector: options.waitForSelector,
-            waitForText: options.waitForText
+            waitForText: options.waitForText,
+            verbose: options.verbose
         )
     }
 
@@ -91,7 +100,8 @@ public enum WebPageFetcher {
         extractMainOnly: Bool = false,
         waitSeconds: TimeInterval = 0,
         waitForSelector: String? = nil,
-        waitForText: String? = nil
+        waitForText: String? = nil,
+        verbose: Bool = false
     ) async throws -> FetchedPage {
         os_log(
             .info,
@@ -136,7 +146,8 @@ public enum WebPageFetcher {
                             extractMainOnly: extractMainOnly,
                             waitSeconds: waitSeconds,
                             waitForSelector: waitForSelector,
-                            waitForText: waitForText
+                            waitForText: waitForText,
+                            verbose: verbose
                         )
 
                         state.access { state in
@@ -252,6 +263,7 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
     let waitSeconds: TimeInterval
     let waitForSelector: String?
     let waitForText: String?
+    let verbose: Bool
     var timeoutTask: Task<Void, Never>?
     var capturedStatusCode: Int?
 
@@ -262,7 +274,8 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
         extractMainOnly: Bool,
         waitSeconds: TimeInterval,
         waitForSelector: String?,
-        waitForText: String?
+        waitForText: String?,
+        verbose: Bool
     ) {
         self.webView = webView
         self.state = state
@@ -270,6 +283,7 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
         self.waitSeconds = waitSeconds
         self.waitForSelector = waitForSelector
         self.waitForText = waitForText
+        self.verbose = verbose
         super.init()
 
         timeoutTask = Task { @MainActor in
@@ -406,7 +420,10 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
     ) async
         -> WKNavigationActionPolicy
     {
-        if let url = navigationAction.request.url {
+        // Per-navigation events are noisy on chrome-heavy pages (every iframe,
+        // every about:blank initial state, every redirect fires this). Off by
+        // default; opt in via FetchOptions.verbose / CLI --verbose.
+        if verbose, let url = navigationAction.request.url {
             os_log(
                 .info,
                 log: log,

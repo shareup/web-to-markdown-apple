@@ -68,7 +68,8 @@ struct WebToMarkdownCommand: AsyncParsableCommand {
             extractMainOnly: main,
             waitSeconds: wait,
             waitForSelector: waitFor,
-            waitForText: waitForText
+            waitForText: waitForText,
+            verbose: verbose
         )
 
         let page = try await WebPageFetcher.fetch(from: parsedURL, options: options)
