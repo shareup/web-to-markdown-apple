@@ -48,7 +48,7 @@ public struct Frontmatter: Sendable {
         }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
-        lines.append("fetched-at: \(formatter.string(from: fetchedAt))")
+        lines.append("fetched-at: \(yamlEscape(formatter.string(from: fetchedAt)))")
         lines.append("---")
         return lines.joined(separator: "\n")
     }
