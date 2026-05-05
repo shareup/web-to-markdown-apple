@@ -54,6 +54,14 @@ struct WebToMarkdownCommand: AsyncParsableCommand {
     )
     var waitForText: String?
 
+    func validate() throws {
+        if head, skipFrontmatter {
+            throw ValidationError(
+                "--head and --skip-frontmatter are mutually exclusive: --head prints only the frontmatter, --skip-frontmatter prints only the body. Pick one."
+            )
+        }
+    }
+
     mutating func run() async throws {
         guard let parsedURL = URL(string: url) else {
             throw ValidationError("Invalid URL: \(url)")
@@ -87,7 +95,7 @@ struct WebToMarkdownCommand: AsyncParsableCommand {
             fputs("Converting to markdown...\n", stderr)
         }
 
-        let markdown = try HTMLToMarkdown.convert(page.html, baseURL: parsedURL)
+        let markdown = try HTMLToMarkdown.convert(page.html, baseURL: page.finalURL)
         print(markdown)
     }
 }
