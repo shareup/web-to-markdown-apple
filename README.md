@@ -21,14 +21,17 @@ markdown:
 ```
 ---
 status: 200
-final-url: https://example.com/
+final-url: "https://example.com/"
 title: Example Domain
-fetched-at: 2026-04-29T21:42:56Z
+fetched-at: "2026-04-29T21:42:56Z"
 ---
 
 # Example Domain
 …
 ```
+
+Values containing `:` (URLs, ISO timestamps) are double-quoted so the output
+parses cleanly as YAML.
 
 ### Flags
 
