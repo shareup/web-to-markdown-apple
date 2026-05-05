@@ -27,7 +27,8 @@ struct FrontmatterTests {
         #expect(out.contains("final-url: \"https://example.com/\""))
         #expect(out.contains("title: Hello"))
         #expect(out.contains("description: A description."))
-        #expect(out.contains("fetched-at: 2023-11-14T22:13:20Z"))
+        // ISO8601 timestamp contains ':' so it gets quoted.
+        #expect(out.contains("fetched-at: \"2023-11-14T22:13:20Z\""))
     }
 
     @Test
