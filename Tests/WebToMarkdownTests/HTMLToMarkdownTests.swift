@@ -73,6 +73,13 @@ struct FrontmatterTests {
     }
 
     @Test
+    func quotesValuesWithLeadingYamlIndicators() {
+        #expect(Frontmatter.yamlEscape("[Draft]") == "\"[Draft]\"")
+        #expect(Frontmatter.yamlEscape("*alias") == "\"*alias\"")
+        #expect(Frontmatter.yamlEscape("> block") == "\"> block\"")
+    }
+
+    @Test
     func quotesEmptyAndWhitespacePadded() {
         #expect(Frontmatter.yamlEscape("") == "\"\"")
         #expect(Frontmatter.yamlEscape(" leading") == "\" leading\"")

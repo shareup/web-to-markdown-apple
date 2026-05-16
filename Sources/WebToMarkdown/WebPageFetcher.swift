@@ -210,7 +210,7 @@ if (typeof waitForSelector === "string" && waitForSelector.length > 0) {
     var obs = new MutationObserver(function() {
       if (check()) { obs.disconnect(); resolve(); }
     });
-    obs.observe(document.documentElement, { childList: true, subtree: true });
+    obs.observe(document.documentElement, { attributes: true, childList: true, subtree: true });
   });
 }
 
@@ -305,7 +305,9 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
         _: WKWebView,
         decidePolicyFor navigationResponse: WKNavigationResponse
     ) async -> WKNavigationResponsePolicy {
-        if let httpResponse = navigationResponse.response as? HTTPURLResponse {
+        if navigationResponse.isForMainFrame,
+           let httpResponse = navigationResponse.response as? HTTPURLResponse
+        {
             capturedStatusCode = httpResponse.statusCode
             os_log(
                 .info,
@@ -324,7 +326,7 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
 
         os_log(.info, log: log, "🔧TOOLCALL🔧 WebPageFetcher: Page loaded, extracting HTML")
 
-        let finalURL = webView.url
+        let fallbackURL = webView.url
         let status = capturedStatusCode
 
         let arguments: [String: Any] = [
@@ -356,7 +358,7 @@ private final class NavigationDelegate: NSObject, WKNavigationDelegate {
                     return
                 }
 
-                let resolved = finalURL ?? webView.url ?? URL(string: "about:blank")!
+                let resolved = webView.url ?? fallbackURL ?? URL(string: "about:blank")!
                 let page = FetchedPage(html: html, statusCode: status, finalURL: resolved)
 
                 _ = state.access { $0.finish(with: page) }

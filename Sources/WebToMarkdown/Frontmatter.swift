@@ -65,6 +65,7 @@ public struct Frontmatter: Sendable {
             || flattened.contains("\"")
             || flattened.contains("\\")
             || flattened.contains("#")
+            || flattened.first.map { "-?:,[]{}#&*!|>'\"%@`".contains($0) } == true
             || flattened.first == " "
             || flattened.last == " "
             || flattened.isEmpty

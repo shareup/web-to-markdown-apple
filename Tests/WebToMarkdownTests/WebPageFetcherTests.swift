@@ -67,6 +67,32 @@ struct WebPageFetcherTests {
     }
 
     @Test
+    func waitForSelectorHandlesAttributeMutation() async throws {
+        let url = dataURL(
+            """
+            <html>
+              <body>
+                <main id="content">Loading</main>
+                <script>
+                  setTimeout(function() {
+                    document.getElementById("content").setAttribute("data-ready", "true");
+                  }, 100);
+                </script>
+              </body>
+            </html>
+            """
+        )
+
+        let page = try await WebPageFetcher.fetch(
+            from: url,
+            timeout: 5,
+            waitForSelector: "[data-ready='true']"
+        )
+
+        #expect(page.html.contains("data-ready=\"true\""))
+    }
+
+    @Test
     func fixedWaitDelaysExtraction() async throws {
         let url = URL(string: "https://example.com")!
         let start = Date()
@@ -109,4 +135,9 @@ private func yield(_ times: Int) async {
     for _ in 0 ..< times {
         await Task.yield()
     }
+}
+
+private func dataURL(_ html: String) -> URL {
+    let encoded = Data(html.utf8).base64EncodedString()
+    return URL(string: "data:text/html;charset=utf-8;base64,\(encoded)")!
 }
