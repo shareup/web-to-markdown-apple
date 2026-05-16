@@ -1,6 +1,16 @@
 import Foundation
 import SwiftSoup
 
+public struct PageMetadata: Sendable {
+    public let title: String?
+    public let description: String?
+
+    public init(title: String?, description: String?) {
+        self.title = title
+        self.description = description
+    }
+}
+
 public enum HTMLToMarkdown {
     public enum Error: Swift.Error {
         case parsingFailed(String)
@@ -17,6 +27,41 @@ public enum HTMLToMarkdown {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         return collapseExcessiveNewlines(markdown)
+    }
+
+    /// Extract the page `<title>` and meta `description` (falling back to
+    /// Open Graph variants when standard tags are missing).
+    public static func extractMetadata(_ html: String) throws -> PageMetadata {
+        let document = try SwiftSoup.parse(html)
+
+        let title: String? = try {
+            if let el = try document.select("title").first() {
+                let text = try el.text().trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty { return text }
+            }
+            if let el = try document.select("meta[property=og:title]").first() {
+                let text = try el.attr("content")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty { return text }
+            }
+            return nil
+        }()
+
+        let description: String? = try {
+            if let el = try document.select("meta[name=description]").first() {
+                let text = try el.attr("content")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty { return text }
+            }
+            if let el = try document.select("meta[property=og:description]").first() {
+                let text = try el.attr("content")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty { return text }
+            }
+            return nil
+        }()
+
+        return PageMetadata(title: title, description: description)
     }
 
     private static func collapseExcessiveNewlines(_ text: String) -> String {
