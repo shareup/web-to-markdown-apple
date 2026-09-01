@@ -22,7 +22,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.7.5"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.4.0"),
-        .package(url: "https://github.com/shareup/synchronized.git", from: "4.0.1"),
+        .package(url: "https://github.com/shareup/synchronized.git", from: "4.0.2"),
     ],
     targets: [
         .target(
